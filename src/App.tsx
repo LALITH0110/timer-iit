@@ -1,17 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Pause, RotateCcw, Settings, X, Upload, Volume2 } from 'lucide-react';
 
-const COLORS = {
-  primary: '#DC143C',
-  primaryDark: '#B91C3C',
-  secondary: '#1F1F1F',
-  light: '#FFFFFF',
-  lightRed: '#FCA5A5',
-  gray: '#6B7280',
-  grayLight: '#F3F4F6',
-  grayDark: '#374151'
-};
-
 interface SoundOption {
   id: string;
   name: string;
@@ -29,6 +18,7 @@ const SOUND_OPTIONS: SoundOption[] = [
 ];
 
 function App() {
+  console.log('🎯 Timer App is loading...');
   const [minutes, setMinutes] = useState(5);
   const [seconds, setSeconds] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
@@ -60,10 +50,16 @@ function App() {
     }
     return true;
   });
+  const [completionMessage, setCompletionMessage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('timerCompletionMessage') || '🎉 Time\'s up! Great work!';
+    }
+    return '🎉 Time\'s up! Great work!';
+  });
   const [isConfettiActive, setIsConfettiActive] = useState(false);
   
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<{ play: () => void } | null>(null);
   const confettiCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Save settings to localStorage when they change
@@ -91,12 +87,19 @@ function App() {
     }
   }, [showConfetti]);
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('timerCompletionMessage', completionMessage);
+    }
+  }, [completionMessage]);
+
   // Initialize audio for completion sound
   useEffect(() => {
     // Create sound based on selected option - repeat 3 times for completion
     const createSound = () => {
       const soundOption = SOUND_OPTIONS.find(s => s.id === selectedSound) || SOUND_OPTIONS[0];
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioContextClass();
       
       // Play the sound 3 times with spacing
       for (let repeat = 0; repeat < 3; repeat++) {
@@ -200,7 +203,11 @@ function App() {
       }
     };
     
-    audioRef.current = { play: createSound } as any;
+    audioRef.current = { 
+      play: () => {
+        createSound();
+      }
+    };
   }, [selectedSound]);
 
   const startTimer = useCallback(() => {
@@ -247,7 +254,8 @@ function App() {
     const soundOption = SOUND_OPTIONS.find(s => s.id === soundId);
     if (!soundOption) return;
 
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const audioContext = new AudioContextClass();
     
     if (soundOption.type === 'single') {
       const oscillator = audioContext.createOscillator();
@@ -345,15 +353,30 @@ function App() {
 
   // Confetti animation function
   const triggerConfetti = useCallback(() => {
-    setIsConfettiActive(true);
-    const canvas = confettiCanvasRef.current;
-    if (!canvas) return;
+    try {
+      console.log('🎉 Triggering confetti...');
+      setIsConfettiActive(true);
+      
+      // Small delay to ensure canvas is rendered
+      setTimeout(() => {
+        const canvas = confettiCanvasRef.current;
+        if (!canvas) {
+          console.warn('❌ Canvas not found');
+          setIsConfettiActive(false);
+          return;
+        }
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          console.warn('❌ Canvas context not available');
+          setIsConfettiActive(false);
+          return;
+        }
 
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+        // Set canvas size
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        console.log(`📏 Canvas size: ${canvas.width}x${canvas.height}`);
 
     interface ConfettiPiece {
       x: number;
@@ -383,40 +406,57 @@ function App() {
       });
     }
 
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const animate = () => {
+          try {
+            if (!canvas || !ctx) {
+              setIsConfettiActive(false);
+              return;
+            }
 
-      for (let i = confettiPieces.length - 1; i >= 0; i--) {
-        const piece = confettiPieces[i];
-        
-        // Update position
-        piece.x += piece.dx;
-        piece.y += piece.dy;
-        piece.rotation += piece.rotationSpeed;
-        piece.dy += 0.1; // gravity
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Draw confetti piece
-        ctx.save();
-        ctx.translate(piece.x, piece.y);
-        ctx.rotate(piece.rotation * Math.PI / 180);
-        ctx.fillStyle = piece.color;
-        ctx.fillRect(-piece.size/2, -piece.size/2, piece.size, piece.size);
-        ctx.restore();
+            for (let i = confettiPieces.length - 1; i >= 0; i--) {
+              const piece = confettiPieces[i];
+              
+              // Update position
+              piece.x += piece.dx;
+              piece.y += piece.dy;
+              piece.rotation += piece.rotationSpeed;
+              piece.dy += 0.1; // gravity
 
-        // Remove if off screen
-        if (piece.y > canvas.height + 10) {
-          confettiPieces.splice(i, 1);
-        }
-      }
+              // Draw confetti piece
+              ctx.save();
+              ctx.translate(piece.x, piece.y);
+              ctx.rotate(piece.rotation * Math.PI / 180);
+              ctx.fillStyle = piece.color;
+              ctx.fillRect(-piece.size/2, -piece.size/2, piece.size, piece.size);
+              ctx.restore();
 
-      if (confettiPieces.length > 0) {
-        requestAnimationFrame(animate);
-      } else {
-        setIsConfettiActive(false);
-      }
-    };
+              // Remove if off screen
+              if (piece.y > canvas.height + 10) {
+                confettiPieces.splice(i, 1);
+              }
+            }
 
-    animate();
+            if (confettiPieces.length > 0) {
+              requestAnimationFrame(animate);
+            } else {
+              console.log('✅ Confetti animation completed');
+              setIsConfettiActive(false);
+            }
+          } catch (error) {
+            console.error('❌ Confetti animation error:', error);
+            setIsConfettiActive(false);
+          }
+        };
+
+        console.log(`🎊 Starting animation with ${confettiPieces.length} pieces`);
+        animate();
+      }, 50); // 50ms delay to ensure canvas is ready
+    } catch (error) {
+      console.error('❌ Confetti setup error:', error);
+      setIsConfettiActive(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -489,7 +529,13 @@ function App() {
         <canvas
           ref={confettiCanvasRef}
           className="fixed inset-0 pointer-events-none z-50"
-          style={{ width: '100vw', height: '100vh' }}
+          style={{ 
+            width: '100vw', 
+            height: '100vh',
+            position: 'fixed',
+            top: 0,
+            left: 0
+          }}
         />
       )}
       {/* Settings Button */}
@@ -564,6 +610,24 @@ function App() {
                     ✓ Background image uploaded
                   </div>
                 )}
+              </div>
+
+              {/* Completion Message */}
+              <div>
+                <label className="block text-red-300 text-sm font-medium mb-2">
+                  Completion Message
+                </label>
+                <input
+                  type="text"
+                  value={completionMessage}
+                  onChange={(e) => setCompletionMessage(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-700 border border-red-500/30 rounded-xl text-white focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/30 transition-all duration-200"
+                  placeholder="Enter completion message"
+                  maxLength={50}
+                />
+                <div className="mt-1 text-xs text-gray-400">
+                  Max 50 characters
+                </div>
               </div>
 
               {/* Confetti Toggle */}
@@ -760,7 +824,7 @@ function App() {
         {isCompleted && (
           <div className="mt-8 text-center">
             <div className="inline-block bg-red-600/20 border border-red-500/50 rounded-xl px-6 py-3 animate-pulse">
-              <p className="text-red-300 font-medium">🎉 Time's up! Great work!</p>
+              <p className="text-red-300 font-medium">{completionMessage}</p>
             </div>
           </div>
         )}
